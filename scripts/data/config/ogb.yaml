@@ -11,8 +11,17 @@ hydra:
 cache_dir: null
 dataset_name: ogb
 
+env_type: single
+multiview: true
+chain_tasks: true
+terminate_at_goal: false
+mode: append
+dataset_file: null
+
 world:
-  num_envs: 10
+  # 5 is the stable ceiling for EGL rendering here; 10 hits EGL_BAD_ACCESS
+  # (multi-context race on the lancedb writer thread) and corrupts the table.
+  num_envs: 5
   max_episode_steps: 200
   image_shape: [224, 224]
 

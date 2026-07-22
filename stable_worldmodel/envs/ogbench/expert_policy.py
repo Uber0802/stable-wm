@@ -21,6 +21,7 @@ class ExpertPolicy(BasePolicy):
         p_random_action=0.0,
         noise_smoothing=0.5,
         min_norm=0.4,
+        chain_tasks=True,
         seed: int | None = None,
         **kwargs,
     ):
@@ -48,6 +49,7 @@ class ExpertPolicy(BasePolicy):
         self.p_random_action = p_random_action
         self.noise_smoothing = noise_smoothing
         self.min_norm = min_norm
+        self.chain_tasks = chain_tasks
         self.set_seed(seed)
 
     def set_seed(self, seed: int | None) -> None:
@@ -260,7 +262,7 @@ class ExpertPolicy(BasePolicy):
             actions[i] = action
 
             # Set a new task when the current subtask is done.
-            if self._agents[i].done:
+            if self._agents[i].done and self.chain_tasks:
                 agent_ob, agent_info = env.unwrapped.set_new_target(
                     p_stack=self._p_stack[i]
                 )
