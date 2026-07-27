@@ -15,9 +15,9 @@ from stable_worldmodel.envs.ogbench import ExpertPolicy
 @hydra.main(version_base=None, config_path='./config', config_name='ogb')
 def run(cfg: DictConfig):
     """Run parallel data collection script"""
-    
     env_type = cfg.get('env_type', 'single')
     chain_tasks = cfg.get('chain_tasks', True)
+    p_stack = cfg.get('p_stack', None)
     terminate_at_goal = cfg.get('terminate_at_goal', False)
     multiview = cfg.get('multiview', True)
 
@@ -36,7 +36,7 @@ def run(cfg: DictConfig):
     options = cfg.get('options')
     options = OmegaConf.to_object(options) if options is not None else None
     rng = np.random.default_rng(cfg.seed)
-    world.set_policy(ExpertPolicy(chain_tasks=chain_tasks))
+    world.set_policy(ExpertPolicy(chain_tasks=chain_tasks, p_stack=p_stack))
 
     view_tag = 'multiview' if multiview else 'singleview'
     dataset_file = (

@@ -35,7 +35,16 @@ def default_goal_encode(model: Dynamics, info_dict: dict) -> torch.Tensor:
         if k.startswith('goal_'):
             goal[k[len('goal_') :]] = goal.pop(k)
 
-    goal.pop('action')
+    
+    extra_encoders = getattr(model, 'extra_encoders', None)
+    if extra_encoders is not None and 'action' in extra_encoders:
+        in_chans = extra_encoders['action'].in_chans
+        a = goal['action']
+        goal['action'] = torch.zeros(
+            *a.shape[:-1], in_chans, dtype=a.dtype, device=a.device
+        )
+    else:
+        goal.pop('action')
     goal = model.encode(goal)
     return goal['emb']
 

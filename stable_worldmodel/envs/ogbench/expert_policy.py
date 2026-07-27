@@ -22,6 +22,7 @@ class ExpertPolicy(BasePolicy):
         noise_smoothing=0.5,
         min_norm=0.4,
         chain_tasks=True,
+        p_stack=None,
         seed: int | None = None,
         **kwargs,
     ):
@@ -50,6 +51,7 @@ class ExpertPolicy(BasePolicy):
         self.noise_smoothing = noise_smoothing
         self.min_norm = min_norm
         self.chain_tasks = chain_tasks
+        self.p_stack_override = p_stack
         self.set_seed(seed)
 
     def set_seed(self, seed: int | None) -> None:
@@ -196,6 +198,9 @@ class ExpertPolicy(BasePolicy):
                 }
 
     def _get_cube_stack_prob(self):
+        if self.p_stack_override is not None:
+            return self.p_stack_override
+
         envs = [e.unwrapped for e in self.env.envs]
         env_type = envs[0]._env_type  # assuming all envs have the same type
 

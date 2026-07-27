@@ -16,6 +16,9 @@ world:
   visualize_info: False
   terminate_at_goal: True
 
+objective:
+  pred_key: predicted_embedding # key PreJEPA's rollout writes
+
 dataset:
   stats: ${eval.dataset_name}
   keys_to_cache:
@@ -27,15 +30,18 @@ policy: random # ckpt name (a trained DINO-WM/PreJEPA run) or random
 plan_config:
   horizon: 5
   receding_horizon: 5
-  action_block: 5 # frameskip
+  history_len: 3 # must match the trained model's history_size
+  action_block: 1 # frameskip=1
 
 # evaluation from dataset (replay expert trajectories)
 eval:
-  num_eval: 50
-  goal_offset_steps: 25
-  eval_budget: 50
+  num_eval: 32
+  goal_at_end: true # goal = episode's final frame (the completed tower)
+  init_first_goal_last: false # true = start from first frame (build from scratch)
+  goal_offset_steps: 5 # start this many steps before the goal
+  eval_budget: 20
   img_size: 224
-  dataset_name: ogbench/cube_double_multiview_expert.lance
+  dataset_name: ogbench/cube_double_fullstack.lance
   callables:
     # -- set state
     - method: set_state
@@ -51,9 +57,9 @@ eval:
           value: 0
           in_dataset: False
         target_pos:
-          value: goal_privileged_block_0_pos
+          value: goal_privileged/block_0_pos
         target_quat:
-          value: goal_privileged_block_0_quat
+          value: goal_privileged/block_0_quat
     # -- set target pos for cube 1 (the extra cube for double/stacking)
     - method: set_target_pos
       args:
@@ -61,9 +67,9 @@ eval:
           value: 1
           in_dataset: False
         target_pos:
-          value: goal_privileged_block_1_pos
+          value: goal_privileged/block_1_pos
         target_quat:
-          value: goal_privileged_block_1_quat
+          value: goal_privileged/block_1_quat
 
 output:
   filename: ogb_cube_double_results.txt

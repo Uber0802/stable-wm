@@ -548,6 +548,10 @@ class World:
         }
         frames: dict[int, list] = defaultdict(list) if video else None
 
+        from tqdm import tqdm
+
+        pbar = tqdm(total=eval_budget, desc='Evaluating')
+
         def on_step(world, mask):
             world.infos.update(deepcopy(goal_snapshot))
             results['episode_successes'] |= world.terminateds
@@ -556,8 +560,15 @@ class World:
                     f = world.infos['pixels'][i]
                     frame = f[-1] if f.ndim > 3 else f
                     frames[i].append(np.asarray(frame).copy())
+            pbar.update(1)
+            pbar.set_postfix(
+                success=f'{int(results["episode_successes"].sum())}/{n}'
+            )
 
-        self._run(max_steps=eval_budget, mode=mode, on_step=on_step)
+        try:
+            self._run(max_steps=eval_budget, mode=mode, on_step=on_step)
+        finally:
+            pbar.close()
 
         results['success_rate'] = (
             float(results['episode_successes'].sum()) / n * 100.0

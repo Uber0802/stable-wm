@@ -1,2 +1,6 @@
 /dataset/*
 scripts/data/multirun/*
+scripts/plan/outputs/*
+scripts/train/outputs/*
+
+**/__pycache__/*

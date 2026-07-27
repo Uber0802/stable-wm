@@ -144,36 +144,48 @@ def run(cfg: DictConfig):
 
     # sample the episodes and the starting indices
     episode_len = get_episodes_length(dataset, ep_indices)
-    max_start_idx = episode_len - cfg.eval.goal_offset_steps - 1
-    max_start_idx_dict = {
-        ep_id: max_start_idx[i] for i, ep_id in enumerate(ep_indices)
-    }
-    # Map each dataset row’s episode_idx to its max_start_idx
     col_name = episode_col(dataset)
-    max_start_per_row = np.array(
-        [max_start_idx_dict[ep_id] for ep_id in dataset.get_col_data(col_name)]
-    )
-
-    # remove all the lines of dataset for which dataset['step_idx'] > max_start_per_row
-    valid_mask = dataset.get_col_data('step_idx') <= max_start_per_row
-    valid_indices = np.nonzero(valid_mask)[0]
-    print(valid_mask.sum(), 'valid starting points found for evaluation.')
-
     g = np.random.default_rng(cfg.seed)
-    random_episode_indices = g.choice(
-        len(valid_indices) - 1, size=cfg.eval.num_eval, replace=False
-    )
 
-    # sort increasingly to avoid issues with HDF5Dataset indexing
-    random_episode_indices = np.sort(valid_indices[random_episode_indices])
+    if cfg.eval.get('init_first_goal_last', False):
+        # init = first frame, goal = last frame: build the tower from scratch.
+        chosen = np.sort(
+            g.choice(len(ep_indices), size=cfg.eval.num_eval, replace=False)
+        )
+        eval_episodes = np.asarray(ep_indices)[chosen]
+        eval_start_idx = np.zeros(cfg.eval.num_eval, dtype=int)
+        eval_goal_offset = (np.asarray(episode_len)[chosen] - 1).astype(int)
+    else:
+        max_start_idx = episode_len - cfg.eval.goal_offset_steps - 1
+        max_start_idx_dict = {
+            ep_id: max_start_idx[i] for i, ep_id in enumerate(ep_indices)
+        }
+        max_start_per_row = np.array(
+            [
+                max_start_idx_dict[ep_id]
+                for ep_id in dataset.get_col_data(col_name)
+            ]
+        )
 
-    print(random_episode_indices)
+        step_idx_col = dataset.get_col_data('step_idx')
+        if cfg.eval.get('goal_at_end', False):
+            # goal = each episode's final frame (start + goal_offset = length-1)
+            valid_mask = step_idx_col == max_start_per_row
+        else:
+            valid_mask = step_idx_col <= max_start_per_row
+        valid_indices = np.nonzero(valid_mask)[0]
+        print(valid_mask.sum(), 'valid starting points found for evaluation.')
 
-    # Index the full index columns directly: the Lance reader excludes
-    # index columns (episode_idx/step_idx) from get_row_data, but get_col_data
-    # exposes them (and both are already cached from the checks above).
-    eval_episodes = dataset.get_col_data(col_name)[random_episode_indices]
-    eval_start_idx = dataset.get_col_data('step_idx')[random_episode_indices]
+        random_episode_indices = g.choice(
+            len(valid_indices) - 1, size=cfg.eval.num_eval, replace=False
+        )
+        # sort increasingly to avoid issues with HDF5Dataset indexing
+        random_episode_indices = np.sort(valid_indices[random_episode_indices])
+        eval_episodes = dataset.get_col_data(col_name)[random_episode_indices]
+        eval_start_idx = dataset.get_col_data('step_idx')[
+            random_episode_indices
+        ]
+        eval_goal_offset = cfg.eval.goal_offset_steps
 
     if len(eval_episodes) < cfg.eval.num_eval:
         raise ValueError(
@@ -206,7 +218,7 @@ def run(cfg: DictConfig):
             world.evaluate(
                 dataset=dataset,
                 start_steps=eval_start_idx.tolist()[:n],
-                goal_offset=cfg.eval.goal_offset_steps,
+                goal_offset=eval_goal_offset,
                 eval_budget=cfg.eval.eval_budget,
                 episodes_idx=eval_episodes.tolist()[:n],
                 callables=OmegaConf.to_container(
@@ -221,7 +233,7 @@ def run(cfg: DictConfig):
         metrics = world.evaluate(
             dataset=dataset,
             start_steps=eval_start_idx.tolist(),
-            goal_offset=cfg.eval.goal_offset_steps,
+            goal_offset=eval_goal_offset,
             eval_budget=cfg.eval.eval_budget,
             episodes_idx=eval_episodes.tolist(),
             callables=OmegaConf.to_container(
