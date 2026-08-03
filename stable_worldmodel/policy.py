@@ -80,6 +80,29 @@ class BasePolicy:
         """
         self.env = env
 
+    def _merge_info_keys(self, info_dict: dict) -> dict:
+        if not getattr(self, 'keys_to_merge', None):
+            return info_dict
+
+        out = dict(info_dict)
+        alias = {k.replace('/', '_'): k for k in info_dict}
+
+        for target, sources in self.keys_to_merge.items():
+            if isinstance(sources, str):
+                sources = [sources]
+            for prefix in ('', 'goal_'):
+                merged_key = f'{prefix}{target}'
+                if merged_key in out:
+                    continue
+                cols = [alias.get(f'{prefix}{s}') for s in sources]
+                if any(c is None for c in cols):
+                    continue
+                out[merged_key] = np.concatenate(
+                    [np.asarray(out[c]) for c in cols], axis=-1
+                )
+
+        return out
+
     def _prepare_info(self, info_dict: dict) -> dict[str, torch.Tensor]:
         """Pre-process and transform observations.
 
@@ -96,6 +119,8 @@ class BasePolicy:
         Raises:
             ValueError: If an expected numpy array is missing for processing.
         """
+        info_dict = self._merge_info_keys(info_dict)
+
         out = {}
         for k, v in info_dict.items():
             is_numpy = isinstance(v, (np.ndarray | np.generic))
@@ -307,6 +332,7 @@ class WorldModelPolicy(BasePolicy):
         process: dict[str, Transformable] | None = None,
         transform: dict[str, Callable[[torch.Tensor], torch.Tensor]]
         | None = None,
+        keys_to_merge: dict[str, list[str] | str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the world model policy.
@@ -325,6 +351,7 @@ class WorldModelPolicy(BasePolicy):
         self.solver = solver
         self.process = process or {}
         self.transform = transform or {}
+        self.keys_to_merge = keys_to_merge or {}
         self._action_buffer: list[deque[torch.Tensor]] | None = None
         self._next_init: torch.Tensor | None = None
 

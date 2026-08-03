@@ -186,17 +186,24 @@ class CEMSolver:
             for cb in self.callbacks:
                 cb.start_batch()
 
+            noise = torch.stack(
+                [
+                    torch.randn(
+                        self.n_steps,
+                        self.num_samples,
+                        self.horizon,
+                        self.action_dim,
+                        generator=self.torch_gen,
+                        device=self.device,
+                        dtype=self.dtype,
+                    )
+                    for _ in range(current_bs)
+                ],
+                dim=0,
+            )  # (Batch, n_steps, N, H, D)
+
             for step in range(self.n_steps):
-                # Sample action sequences: (Batch, Num_Samples, Horizon, Dim)
-                candidates = torch.randn(
-                    current_bs,
-                    self.num_samples,
-                    self.horizon,
-                    self.action_dim,
-                    generator=self.torch_gen,
-                    device=self.device,
-                    dtype=self.dtype,
-                )
+                candidates = noise[:, step]
 
                 # Scale and shift: (Batch, N, H, D) * (Batch, 1, H, D) + (Batch, 1, H, D)
                 candidates = candidates * batch_var.unsqueeze(

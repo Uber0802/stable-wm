@@ -196,6 +196,7 @@ class World:
         episodes_idx: list[int] | None = None,
         start_steps: list[int] | None = None,
         goal_offset: int | None = None,
+        subgoal_every: int | None = None,
         eval_budget: int | None = None,
         callables: list[dict] | None = None,
     ) -> dict:
@@ -227,6 +228,9 @@ class World:
             episodes_idx: Dataset episode indices, one per env.
             start_steps: Starting step within each dataset episode.
             goal_offset: Offset from each start step that defines the goal.
+            subgoal_every: If set, the planner is shown waypoints from the
+                same trajectory every ``subgoal_every`` steps instead of the
+                final goal. Success is still judged against the final goal.
             eval_budget: Max env steps per episode in dataset mode.
             callables: Per-env setup calls applied on the unwrapped env
                 after reset. Each spec is
@@ -250,6 +254,7 @@ class World:
                 callables,
                 video,
                 mode,
+                subgoal_every,
             )
         mode = reset_mode or 'auto'
         return self._evaluate(episodes, seed, options, video, mode)
@@ -509,15 +514,19 @@ class World:
         callables,
         video,
         mode,
+        subgoal_every=None,
     ) -> dict:
         n = len(episodes_idx)
         assert n == self.num_envs
 
-        init_state, goal_state, dataset_videos = _extract_init_goal(
-            dataset,
-            episodes_idx,
-            start_steps,
-            goal_offset,
+        init_state, goal_state, dataset_videos, subgoal_states = (
+            _extract_init_goal(
+                dataset,
+                episodes_idx,
+                start_steps,
+                goal_offset,
+                subgoal_every,
+            )
         )
 
         self.reset(seed=init_state.get('seed'))
@@ -541,6 +550,28 @@ class World:
 
         goal_snapshot = {k: self.infos[k].copy() for k in goal_state}
 
+        # Only what the policy sees changes; the env target set by
+        # _apply_callables stays on the final goal, so success is unaffected.
+        snapshots = [goal_snapshot]
+        steps_per_sub = eval_budget
+        if subgoal_every and subgoal_states:
+            snapshots = [
+                {
+                    k: np.broadcast_to(
+                        v[:, None, ...], shape_prefix + v.shape[1:]
+                    ).copy()
+                    for k, v in sub.items()
+                }
+                for sub in subgoal_states
+            ]
+            steps_per_sub = max(1, eval_budget // len(snapshots))
+            print(
+                f'[subgoal] {len(snapshots)} waypoints every {subgoal_every} '
+                f'expert steps, {steps_per_sub} env steps each'
+            )
+
+        step_counter = {'t': 0}
+
         results = {
             'success_rate': 0.0,
             'episode_successes': np.zeros(n, dtype=bool),
@@ -553,7 +584,9 @@ class World:
         pbar = tqdm(total=eval_budget, desc='Evaluating')
 
         def on_step(world, mask):
-            world.infos.update(deepcopy(goal_snapshot))
+            k = min(step_counter['t'] // steps_per_sub, len(snapshots) - 1)
+            step_counter['t'] += 1
+            world.infos.update(deepcopy(snapshots[k]))
             results['episode_successes'] |= world.terminateds
             if frames is not None:
                 for i in range(world.num_envs):
@@ -585,15 +618,28 @@ class World:
         return results
 
 
-def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
+def _extract_init_goal(
+    dataset, episodes_idx, start_steps, goal_offset, subgoal_every=None
+):
+    """Pull the init, goal and optional intermediate states from the chunk.
+
+    Returns ``(init_state, goal_state, dataset_videos, subgoal_states)``;
+    ``subgoal_states`` is empty unless ``subgoal_every`` is set.
+    """
     ep_idx_arr = np.array(episodes_idx)
     start_arr = np.array(start_steps)
     data = dataset.load_chunk(
         ep_idx_arr, start_arr, start_arr + goal_offset + 1
     )
 
+    sub_offsets = []
+    if subgoal_every:
+        sub_offsets = list(range(subgoal_every, goal_offset, subgoal_every))
+        sub_offsets.append(goal_offset)
+
     init_lists: dict[str, list] = {}
     goal_lists: dict[str, list] = {}
+    sub_lists: list[dict[str, list]] = [{} for _ in sub_offsets]
     dataset_videos: list = []
 
     for ep in data:
@@ -608,15 +654,25 @@ def _extract_init_goal(dataset, episodes_idx, start_steps, goal_offset):
             arr = val.numpy() if isinstance(val, torch.Tensor) else val
             init_lists.setdefault(col, []).append(arr[0])
             goal_lists.setdefault(col, []).append(arr[-1])
+            for j, off in enumerate(sub_offsets):
+                # chunk row 0 is `start`, so offset o is at row o
+                sub_lists[j].setdefault(col, []).append(
+                    arr[min(off, len(arr) - 1)]
+                )
             if col == 'pixels':
                 dataset_videos.append(arr)
 
-    init_state = {k: np.stack(v) for k, v in init_lists.items()}
-    goal_state = {}
-    for k, v in goal_lists.items():
-        goal_state['goal' if k == 'pixels' else f'goal_{k}'] = np.stack(v)
+    def _as_goal(lists):
+        out = {}
+        for k, v in lists.items():
+            out['goal' if k == 'pixels' else f'goal_{k}'] = np.stack(v)
+        return out
 
-    return init_state, goal_state, dataset_videos
+    init_state = {k: np.stack(v) for k, v in init_lists.items()}
+    goal_state = _as_goal(goal_lists)
+    subgoal_states = [_as_goal(sl) for sl in sub_lists]
+
+    return init_state, goal_state, dataset_videos, subgoal_states
 
 
 def _apply_callables(env, callables, init_state):

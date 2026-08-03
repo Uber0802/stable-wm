@@ -162,7 +162,20 @@ def dinowm_forward(self, batch, stage, cfg):
 def run(cfg):
     # --- Dataset ---
     encoding_keys = list(cfg.wm.get('encoding', {}).keys())
-    keys_to_load = ['pixels'] + encoding_keys
+
+    _merge_cfg = cfg.get('merge_keys')
+    merge_keys = (
+        OmegaConf.to_container(_merge_cfg, resolve=True) if _merge_cfg else {}
+    )
+    unknown = set(merge_keys) - set(encoding_keys)
+    if unknown:
+        raise ValueError(
+            f'merge_keys targets {sorted(unknown)} are not encoding keys'
+        )
+
+    keys_to_load = ['pixels']
+    for key in encoding_keys:
+        keys_to_load.extend(merge_keys.get(key, [key]))
 
     cache_dir = os.environ.get('LOCAL_DATASET_DIR', None)
     print(
@@ -175,7 +188,8 @@ def run(cfg):
         transform=None,
         cache_dir=cache_dir,
         keys_to_load=keys_to_load,
-        keys_to_cache=encoding_keys,
+        keys_to_cache=[k for k in encoding_keys if k not in merge_keys],
+        keys_to_merge=merge_keys or None,
     )
 
     normalizers = [
@@ -297,7 +311,7 @@ def run(cfg):
             SaveCkptCallback(
                 run_name=cfg.output_model_name,
                 cfg=cfg.model,
-                epoch_interval=5,
+                epoch_interval=1,
             ),
             pl.pytorch.callbacks.LearningRateMonitor(logging_interval='step'),
         ],

@@ -54,11 +54,19 @@ def get_episodes_length(dataset, episodes):
     return np.array(lengths)
 
 
+def get_merge_keys(cfg):
+    merge_cfg = cfg.dataset.get('keys_to_merge')
+    if not merge_cfg:
+        return {}
+    return OmegaConf.to_container(merge_cfg, resolve=True)
+
+
 def get_dataset(cfg, dataset_name):
     dataset = swm.data.load_dataset(
         dataset_name,
         cache_dir=cfg.get('cache_dir', None),
         keys_to_cache=list(cfg.dataset.keys_to_cache),
+        keys_to_merge=get_merge_keys(cfg) or None,
     )
     return dataset
 
@@ -66,6 +74,11 @@ def get_dataset(cfg, dataset_name):
 @hydra.main(version_base=None, config_path='./config', config_name='pusht')
 def run(cfg: DictConfig):
     """Run evaluation of dinowm vs random policy."""
+    # 'highest' is the torch default; +tf32=true trades exactness for speed.
+    torch.set_float32_matmul_precision(
+        'high' if cfg.get('tf32', False) else 'highest'
+    )
+
     assert (
         cfg.plan_config.horizon * cfg.plan_config.action_block
         <= cfg.eval.eval_budget
@@ -76,7 +89,8 @@ def run(cfg: DictConfig):
     world = swm.World(**cfg.world, image_shape=(224, 224))
 
     # create the transform
-    img_dtype = torch.bfloat16 if cfg.get('bf16', False) else torch.float32
+    # bf16 is autocast-only, so images and weights both stay fp32
+    img_dtype = torch.float32
     transform = {
         'pixels': img_transform(cfg, img_dtype),
         'goal': img_transform(cfg, img_dtype),
@@ -89,8 +103,9 @@ def run(cfg: DictConfig):
         stats_dataset.get_col_data(col_name), return_index=True
     )
 
+    merge_keys = get_merge_keys(cfg)
     process = {}
-    for col in cfg.dataset.keys_to_cache:
+    for col in [*cfg.dataset.keys_to_cache, *merge_keys]:
         if col in ['pixels']:
             continue
         processor = preprocessing.StandardScaler()
@@ -107,8 +122,8 @@ def run(cfg: DictConfig):
 
     if policy != 'random':
         model = swm.wm.utils.load_pretrained(cfg.policy)
-        if cfg.get('bf16', False):
-            model = model.to(torch.bfloat16)
+        # Not cast to bf16: Embedder keeps its Conv1d in fp32 via
+        # autocast(enabled=False), so a bf16 bias would meet an fp32 input.
         model = model.to('cuda')
         model = model.eval()
         model.requires_grad_(False)
@@ -124,11 +139,23 @@ def run(cfg: DictConfig):
             )
             model.predictor = torch.compile(model.predictor)
         config = swm.PlanConfig(**cfg.plan_config)
-        objective = hydra.utils.instantiate(cfg.objective)
-        cost = swm.planning.ShootingCostEvaluator(model, objective)
+        if hasattr(model, 'get_cost') and hasattr(model, 'criterion'):
+            print(
+                f'[eval] {type(model).__name__} implements get_cost natively; '
+                f'using it as the cost surface and ignoring objective='
+                f'{cfg.objective.get("_target_", cfg.objective)}'
+            )
+            cost = model
+        else:
+            objective = hydra.utils.instantiate(cfg.objective)
+            cost = swm.planning.ShootingCostEvaluator(model, objective)
         solver = hydra.utils.instantiate(cfg.solver, cost=cost)
         policy = swm.policy.WorldModelPolicy(
-            solver=solver, config=config, process=process, transform=transform
+            solver=solver,
+            config=config,
+            process=process,
+            transform=transform,
+            keys_to_merge=merge_keys or None,
         )
 
     else:
@@ -234,6 +261,7 @@ def run(cfg: DictConfig):
             dataset=dataset,
             start_steps=eval_start_idx.tolist(),
             goal_offset=eval_goal_offset,
+            subgoal_every=cfg.eval.get('subgoal_every', None),
             eval_budget=cfg.eval.eval_budget,
             episodes_idx=eval_episodes.tolist(),
             callables=OmegaConf.to_container(

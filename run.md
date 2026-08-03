@@ -24,8 +24,8 @@ cd scripts/data
 
 python collect_cube.py \
   env_type=double p_stack=1.0 chain_tasks=true terminate_at_goal=false \
-  multiview=false num_traj=1000 world.num_envs=5 \
-  world.max_episode_steps=301 \
+  multiview=false num_traj=10000 world.num_envs=5 \
+  world.max_episode_steps=201 \
   dataset_file=ogbench/cube_double_fullstack_raw.lance mode=overwrite
 
 python make_fullstack.py double 2

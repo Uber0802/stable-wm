@@ -21,6 +21,16 @@ dataset:
   keys_to_cache:
     - action
 
+  keys_to_merge:
+    proprio:
+      - proprio_effector_pos
+      - proprio_effector_yaw
+      - proprio_gripper_contact
+      - proprio_gripper_opening
+      - proprio_gripper_vel
+      - proprio_joint_pos
+      - proprio_joint_vel
+
 seed: 42
 policy: random # ckpt name or random
 

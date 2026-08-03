@@ -1,6 +1,12 @@
 /dataset/*
+/logs/*
+/sbatch_scripts/*
 scripts/data/multirun/*
 scripts/plan/outputs/*
 scripts/train/outputs/*
+/eval_videos/*
+/scripts/plan/*.txt
+/scripts/plan/*.mp4
+/figures/*
 
 **/__pycache__/*

@@ -21,6 +21,8 @@ batch_size: 32
 num_workers: 16
 train_split: 0.9
 
+merge_keys: {}
+
 # --- Backbone ---
 backbone:
   name: dinov2_small

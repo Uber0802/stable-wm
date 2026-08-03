@@ -115,6 +115,47 @@ def test_cem_solver_call():
     assert outputs['actions'].shape == (2, 3, 2)
 
 
+def test_cem_solver_batch_size_invariance():
+    """Every batch_size must reproduce the batch_size=1 result exactly."""
+    n_envs = 10
+
+    def solve_with(batch_size):
+        solver = CEMSolver(
+            cost=DummyCostModel(),
+            batch_size=batch_size,
+            num_samples=32,
+            n_steps=8,
+            topk=8,
+            device='cpu',
+            seed=1234,
+        )
+        action_space = gym_spaces.Box(
+            low=-1, high=1, shape=(n_envs, 3), dtype=np.float32
+        )
+        solver.configure(
+            action_space=action_space,
+            n_envs=n_envs,
+            config=PlanConfig(horizon=5, receding_horizon=5, action_block=1),
+        )
+        info_dict = {
+            'obs': torch.arange(n_envs * 4, dtype=torch.float32).reshape(
+                n_envs, 4
+            )
+        }
+        return solver.solve(info_dict)
+
+    reference = solve_with(1)
+
+    for batch_size in (2, 3, 5, 10):  # 3 leaves a ragged final chunk
+        outputs = solve_with(batch_size)
+        assert torch.equal(reference['actions'], outputs['actions']), (
+            f'batch_size={batch_size} diverged from the batch_size=1 reference'
+        )
+        assert np.allclose(reference['costs'], outputs['costs']), (
+            f'batch_size={batch_size} costs diverged from the reference'
+        )
+
+
 ###########################
 ## ICEMSolver Tests      ##
 ###########################
