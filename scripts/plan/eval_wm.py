@@ -138,6 +138,13 @@ def run(cfg: DictConfig):
                 torch.compile(getattr(model, encoder_attr)),
             )
             model.predictor = torch.compile(model.predictor)
+        cost_weights = cfg.get('cost_weights', None)
+        if cost_weights is not None:
+            model.cost_weights = OmegaConf.to_container(
+                cost_weights, resolve=True
+            )
+            print(f'[eval] cost weights: {model.cost_weights}')
+
         config = swm.PlanConfig(**cfg.plan_config)
         if hasattr(model, 'get_cost') and hasattr(model, 'criterion'):
             print(

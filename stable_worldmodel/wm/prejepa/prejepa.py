@@ -362,14 +362,24 @@ class PreJEPA(torch.nn.Module):
         return info
 
     def criterion(self, info_dict: dict, action_candidates: torch.Tensor):
-        """Compute the cost for planning. Should be overridden for custom costs."""
+        """Compute the cost for planning. Should be overridden for custom costs.
+
+        ``cost_weights`` (a dict keyed like the embeddings, default 1.0) scales
+        each term. The terms are on very different scales -- proprio is roughly
+        7x the pixel term on OGBCube -- so an unweighted sum is dominated by
+        proprio even though success is judged on object position alone.
+        """
         emb_keys = [k for k in self.extra_encoders.keys() if k != 'action']
+        weights = getattr(self, 'cost_weights', None) or {}
         cost = 0.0
 
         for key in emb_keys + ['pixels']:
+            w = weights.get(key, 1.0)
+            if w == 0:
+                continue
             preds = info_dict[f'predicted_{key}_emb']
             goal = info_dict[f'{key}_goal_emb']
-            cost = cost + F.mse_loss(
+            cost = cost + w * F.mse_loss(
                 preds[:, :, -1:], goal, reduction='none'
             ).mean(dim=tuple(range(2, preds.ndim)))
         return cost
