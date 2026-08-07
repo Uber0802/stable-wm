@@ -2,7 +2,6 @@
 
 import os
 
-
 os.environ['MUJOCO_GL'] = 'egl'
 
 
@@ -33,10 +32,16 @@ def img_transform():
     return transform
 
 
+def episode_col(dataset):
+    """Lance hides its index columns from ``column_names`` and exposes them
+    only via ``_schema_names``; consult both."""
+    names = set(dataset.column_names)
+    names |= set(getattr(dataset, '_schema_names', ()))
+    return 'episode_idx' if 'episode_idx' in names else 'ep_idx'
+
+
 def get_episodes_length(dataset, episodes):
-    col_name = (
-        'episode_idx' if 'episode_idx' in dataset.column_names else 'ep_idx'
-    )
+    col_name = episode_col(dataset)
     episode_idx = dataset.get_col_data(col_name)
     step_idx = dataset.get_col_data('step_idx')
     lengths = []
@@ -75,9 +80,7 @@ def run(cfg: DictConfig):
 
     dataset = get_dataset(cfg, cfg.eval.dataset_name)
 
-    col_name = (
-        'episode_idx' if 'episode_idx' in dataset.column_names else 'ep_idx'
-    )
+    col_name = episode_col(dataset)
     ep_indices, _ = np.unique(
         dataset.get_col_data(col_name), return_index=True
     )
@@ -117,6 +120,12 @@ def run(cfg: DictConfig):
         else Path(__file__).parent
     )
 
+    # concurrent seeds share results_path and would overwrite each other's
+    # env_*.mp4, so give each run its own directory when asked
+    video_dir = cfg.output.get('video_dir', None)
+    video_path = Path(video_dir) if video_dir else results_path
+    video_path.mkdir(parents=True, exist_ok=True)
+
     # sample the episodes and the starting indices
     episode_len = get_episodes_length(dataset, ep_indices)
     max_start_idx = episode_len - cfg.eval.goal_offset_steps - 1
@@ -124,15 +133,22 @@ def run(cfg: DictConfig):
         ep_id: max_start_idx[i] for i, ep_id in enumerate(ep_indices)
     }
     # Map each dataset row’s episode_idx to its max_start_idx
-    col_name = (
-        'episode_idx' if 'episode_idx' in dataset.column_names else 'ep_idx'
-    )
+    col_name = episode_col(dataset)
     max_start_per_row = np.array(
         [max_start_idx_dict[ep_id] for ep_id in dataset.get_col_data(col_name)]
     )
 
     # remove all the lines of dataset for which dataset['step_idx'] > max_start_per_row
     valid_mask = dataset.get_col_data('step_idx') <= max_start_per_row
+
+    n_hold = cfg.eval.get('holdout_episodes', 0)
+    if n_hold:
+        # policies are trained on this same dataset, so restrict the start
+        # states to the episodes their training reserved
+        held = swm.data.holdout_episodes(
+            len(ep_indices), n_hold, cfg.eval.get('holdout_seed', 42)
+        )
+        valid_mask &= np.isin(dataset.get_col_data(col_name), held)
     valid_indices = np.nonzero(valid_mask)[0]
     print(valid_mask.sum(), 'valid starting points found for evaluation.')
 
@@ -146,8 +162,8 @@ def run(cfg: DictConfig):
 
     print(random_episode_indices)
 
-    eval_episodes = dataset.get_row_data(random_episode_indices)[col_name]
-    eval_start_idx = dataset.get_row_data(random_episode_indices)['step_idx']
+    eval_episodes = dataset.get_col_data(col_name)[random_episode_indices]
+    eval_start_idx = dataset.get_col_data('step_idx')[random_episode_indices]
 
     if len(eval_episodes) < cfg.eval.num_eval:
         raise ValueError(
@@ -157,16 +173,16 @@ def run(cfg: DictConfig):
     world.set_policy(policy)
 
     start_time = time.time()
-    metrics = world.evaluate_from_dataset(
-        dataset,
+    metrics = world.evaluate(
+        dataset=dataset,
         start_steps=eval_start_idx.tolist(),
-        goal_offset_steps=cfg.eval.goal_offset_steps,
+        goal_offset=cfg.eval.goal_offset_steps,
         eval_budget=cfg.eval.eval_budget,
         episodes_idx=eval_episodes.tolist(),
         callables=OmegaConf.to_container(
             cfg.eval.get('callables'), resolve=True
         ),
-        video_path=results_path,
+        video=video_path,
     )
     end_time = time.time()
 

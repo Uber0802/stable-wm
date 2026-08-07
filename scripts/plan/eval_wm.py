@@ -207,6 +207,17 @@ def run(cfg: DictConfig):
             valid_mask = step_idx_col == max_start_per_row
         else:
             valid_mask = step_idx_col <= max_start_per_row
+
+        n_hold = cfg.eval.get('holdout_episodes', 0)
+        if n_hold:
+            # policies are trained on this same dataset, so restrict the start
+            # states to the episodes their training reserved
+            held = swm.data.holdout_episodes(
+                len(ep_indices), n_hold, cfg.eval.get('holdout_seed', 42)
+            )
+            valid_mask = valid_mask & np.isin(
+                dataset.get_col_data(col_name), held
+            )
         valid_indices = np.nonzero(valid_mask)[0]
         print(valid_mask.sum(), 'valid starting points found for evaluation.')
 

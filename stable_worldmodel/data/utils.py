@@ -34,6 +34,17 @@ def get_cache_dir(
     return cache_path
 
 
+def holdout_episodes(
+    n_episodes: int, n_holdout: int, seed: int = 42
+) -> np.ndarray:
+    """Episodes reserved for evaluation, identical across scripts.
+
+    Training and evaluation must agree on the split exactly, so both derive it
+    from this one function rather than each drawing its own.
+    """
+    return np.random.default_rng(seed).permutation(n_episodes)[:n_holdout]
+
+
 def ensure_dir_exists(path: Path):
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
@@ -461,6 +472,7 @@ __all__ = [
     'merge',
     'get_cache_dir',
     'ensure_dir_exists',
+    'holdout_episodes',
     'IdentityScaler',
     'PercentileScaler',
     'ZScoreScaler',
