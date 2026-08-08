@@ -85,32 +85,28 @@ def run(cfg: DictConfig):
         dataset.get_col_data(col_name), return_index=True
     )
 
-    # create the processing
-    action_process = preprocessing.StandardScaler()
-    action_process.fit(dataset.get_col_data('action'))
+    def fit_scaler(col):
+        scaler = preprocessing.StandardScaler()
+        scaler.fit(dataset.get_col_data(col))
+        return scaler
 
-    process = {'action': action_process}
-
-    if 'proprio' in dataset.column_names:
-        proprio_process = preprocessing.StandardScaler()
-        proprio_process.fit(dataset.get_col_data('proprio'))
-        process['proprio'] = proprio_process
-        process['goal_proprio'] = proprio_process
-
-    # -- run evaluation
     policy = cfg.get('policy', 'random')
-
-    if policy != 'random':
+    if policy == 'random':
+        policy = swm.policy.RandomPolicy()
+    else:
         model = swm.wm.utils.load_pretrained(cfg.policy)
-        model = model.to('cuda')
-        model = model.eval()
+        model = model.to('cuda').eval()
         model.requires_grad_(False)
+
+        process = {}
+        if getattr(model, 'action_norm', 'standard') != 'none':
+            process['action'] = fit_scaler('action')
+        if 'proprio' in dataset.column_names:
+            process['proprio'] = process['goal_proprio'] = fit_scaler('proprio')
 
         policy = swm.policy.FeedForwardPolicy(
             model=model, process=process, transform=transform
         )
-    else:
-        policy = swm.policy.RandomPolicy()
 
     results_path = (
         Path(

@@ -17,7 +17,6 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from omegaconf import OmegaConf
-from sklearn import preprocessing
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader, Subset
 
@@ -104,11 +103,8 @@ def main():
 
     dataset = get_dataset()
     n_ep = len(dataset) // EP_LEN
-    scaler = preprocessing.StandardScaler().fit(
-        np.nan_to_num(dataset.get_col_data('action'), nan=0.0)
-    )
     actions = torch.from_numpy(
-        scaler.transform(np.nan_to_num(dataset.get_col_data('action'), nan=0.0))
+        np.nan_to_num(dataset.get_col_data('action'), nan=0.0)
     ).float().view(n_ep, EP_LEN, -1)
 
     # validation episodes are held out once and kept, so val loss is comparable
@@ -198,6 +194,7 @@ def main():
             'history_size': HISTORY,
             'action_dim': int(actions.shape[-1]),
             'depth': args.depth, 'heads': args.heads,
+            'action_norm': 'none',
         })
         # one rolling file: a timeout then leaves a usable checkpoint where
         # the eval scripts already look for it

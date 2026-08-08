@@ -18,21 +18,19 @@ from torch.utils.data import DataLoader
 import stable_worldmodel as swm
 from stable_worldmodel.wm.bc import FrozenEncoder
 
-DATASET = 'galilai-group/ogb_cube_single'
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--wm-ckpt')
     ap.add_argument('--backbone')
     ap.add_argument('--pool', default='cls', choices=['cls', 'mean'])
     ap.add_argument('--out', required=True)
+    ap.add_argument('--dataset', default='galilai-group/ogb_cube_single')
     ap.add_argument('--batch-size', type=int, default=512)
     ap.add_argument('--num-workers', type=int, default=8)
     args = ap.parse_args()
 
     dataset = swm.data.load_dataset(
-        DATASET,
+        args.dataset,
         transform=spt.data.transforms.Compose(
             spt.data.transforms.ToImage(
                 **spt.data.dataset_stats.ImageNet,

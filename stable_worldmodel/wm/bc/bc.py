@@ -138,10 +138,12 @@ class LatentBC(nn.Module):
         heads: int = 6,
         dropout: float = 0.0,
         head_type: str = 'auto',
+        action_norm: str = 'standard',
     ) -> None:
         super().__init__()
         self.encoder = encoder
         self.history_size = history_size
+        self.action_norm = action_norm
         num_frames = history_size + 1
 
         if head_type == 'auto':

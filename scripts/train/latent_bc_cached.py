@@ -61,8 +61,12 @@ def main():
                     choices=['auto', 'mlp', 'transformer'])
     ap.add_argument('--lr', type=float, default=1e-3)
     ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--init-from',
+                    help='checkpoint whose head weights start this run')
     ap.add_argument('--holdout-episodes', type=int, default=400)
     ap.add_argument('--holdout-seed', type=int, default=42)
+    ap.add_argument('--action-norm', default='none',
+                    choices=['none', 'standard'])
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -70,8 +74,9 @@ def main():
     z_raw, episode, step, action = d['z'], d['episode'], d['step'], d['action']
     print(f'{len(z_raw)} frames, dim {z_raw.shape[1]}', flush=True)
 
-    scaler = preprocessing.StandardScaler().fit(action)
-    action = scaler.transform(np.nan_to_num(action, nan=0.0))
+    action = np.nan_to_num(action, nan=0.0)
+    if args.action_norm == 'standard':
+        action = preprocessing.StandardScaler().fit_transform(action)
 
     order, anchors, ep_end, anchor_ep = build_index(episode, step)
     z = torch.from_numpy(z_raw[order]).float().cuda()
@@ -100,6 +105,16 @@ def main():
         hidden_dim=args.hidden_dim, depth=args.depth, heads=args.heads,
         head_type=args.head_type,
     ).cuda()
+    if args.init_from:
+        src = torch.load(
+            swm.data.utils.get_cache_dir(sub_folder='checkpoints')
+            / args.init_from, map_location='cuda',
+        )
+        model.head.load_state_dict(
+            {k[len('head.'):]: v for k, v in src.items() if k.startswith('head.')}
+        )
+        print(f'head initialised from {args.init_from}', flush=True)
+
     head = model.head
     print(f'{model.head_type} head, '
           f'{sum(p.numel() for p in head.parameters()):,} params', flush=True)
@@ -149,6 +164,7 @@ def main():
         'history_size': HISTORY, 'action_dim': int(a.shape[1]),
         'hidden_dim': args.hidden_dim, 'depth': args.depth,
         'heads': args.heads, 'head_type': model.head_type,
+        'action_norm': args.action_norm,
     })
     save_pretrained(model, run_name=args.out, config=cfg,
                     filename=f'weights_epoch_{args.epochs}.pt')
